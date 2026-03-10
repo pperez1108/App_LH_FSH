@@ -75,5 +75,6 @@ if calcular:
         st.info(f"Confianza: {lh_conf:.1%}  ")
 
     st.divider()
-    st.write(f"**Análisis de consistencia:** El IMC calculado es {imc:.1f}. " 
-             f"El modelo de clasificación ha detectado una probabilidad dominante para la dosis de {lh_class_val} UI.")
+    st.write(f" El IMC calculado es {imc:.1f}. " 
+             f"⚠️ Nota: Esta herramienta es un soporte diagnóstico basado en datos históricos. El criterio final de dosificación corresponde exclusivamente al médico.")
+
