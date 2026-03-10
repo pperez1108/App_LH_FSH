@@ -4,12 +4,11 @@ Created on Tue Mar 10 17:24:57 2026
 
 @author: pperez
 """
-
 import streamlit as st
 import pandas as pd
 import joblib
 
-st.set_page_config(page_title="IA - Dosificación FSH y LH en Estimulaciones", page_icon="💉")
+st.set_page_config(page_title="IA Dosificación", page_icon="💉")
 
 @st.cache_resource
 def load_assets():
@@ -23,11 +22,11 @@ def load_assets():
 
 scaler, m_fsh1, m_lh1_class, m_lh2_reg, features = load_assets()
 
-st.title("Asistente Clínico de Estimulación")
+st.title("Predicción Dosis FSH y LH en estimulación ovárica 💉")
 
-# Sidebar para entrada de datos
 with st.sidebar:
     st.header("Datos Paciente")
+    # Valores por defecto basados en tus datos de ejemplo
     peso = st.number_input("Peso (kg)", value=67.0)
     altura = st.number_input("Altura (m)", value=1.68)
     edad = st.number_input("Edad", value=35)
@@ -38,7 +37,7 @@ with st.sidebar:
 if calcular:
     imc = peso / (altura ** 2)
     
-    # Crear DataFrame de entrada con las 6 features exactas
+    # Crear DataFrame de entrada
     input_data = pd.DataFrame([[peso, altura, edad, amh, rfa, imc]], columns=features)
     input_scaled = pd.DataFrame(scaler.transform(input_data), columns=features)
     
@@ -60,16 +59,21 @@ if calcular:
     
     with col1:
         st.metric("FSH Sugerida", f"{fsh_final} UI")
-        st.caption(f"Valor bruto: {fsh_pred:.1f}")
+        st.caption(f"Valor bruto calculado: {fsh_pred:.1f}")
 
     with col2:
-        if lh_conf >= 0.90:
+        # Lógica de visualización corregida
+        if lh_conf >= 0.90 or lh_class_val == lh_reg_final:
+            # Si hay alta confianza O ambos modelos coinciden, mostramos valor único
             st.metric("LH Sugerida", f"{lh_class_val} UI")
-            st.success(f"Confianza alta: {lh_conf:.1%}")
         else:
+            # Si hay duda y los valores son distintos, mostramos rango
             rango = sorted([lh_class_val, lh_reg_final])
             st.metric("Rango LH Sugerido", f"{rango[0]} - {rango[1]} UI")
-            st.warning(f"Confianza baja ({lh_conf:.1%}). Valor tendencia: {lh_reg_val:.1f}")
+        
+        # Mensaje de confianza unificado sin etiquetas de texto
+        st.info(f"Confianza: {lh_conf:.1%}  ")
 
     st.divider()
-    st.info(f"IMC de la paciente: {imc:.1f}")
+    st.write(f"**Análisis de consistencia:** El IMC calculado es {imc:.1f}. " 
+             f"El modelo de clasificación ha detectado una probabilidad dominante para la dosis de {lh_class_val} UI.")
