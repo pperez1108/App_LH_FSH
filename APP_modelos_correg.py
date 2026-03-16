@@ -5,6 +5,7 @@ Created on Tue Mar 10 17:24:57 2026
 @author: pperez
 """
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import joblib
@@ -51,22 +52,31 @@ st.markdown(f"""
         color: #A78C6F !important;
         text-transform: uppercase;
     }}
+    /* Estilo para los cuadros de dosis finales */
+    .dose-box {{
+        padding: 15px;
+        border-radius: 10px;
+        margin: 5px 0;
+        font-weight: bold;
+        text-align: center;
+    }}
+    .fsh-box {{ background-color: rgba(46, 125, 50, 0.2); border: 1px solid #4CAF50; color: #81C784; }}
+    .lh-box {{ background-color: rgba(25, 118, 210, 0.2); border: 1px solid #2196F3; color: #64B5F6; }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DICCIONARIO DE MEDICAMENTOS ---
+# --- 2. DICCIONARIO DE MEDICAMENTOS (Actualizado) ---
+# Rekovelle se trata internamente como FSH, pero se convertirá a mcg en la salida.
 MEDICAMENTOS = {
     "GONAL": (1.0, 0.0),
     "PUREGON": (1.0, 0.0),
     "BEMFOLA": (1.0, 0.0),
-    "REKOVELLE": (1.0, 0.0),
+    "REKOVELLE": (1.0, 0.0), # Se calcula en UI y se divide por 12.5 al mostrar
     "FOSTIPUR": (1.0, 0.0),
     "OVELAP": (1.0, 0.0),
-    "ELONVA": (1.0, 0.0),
-    "PERGOVERIS": (1.0, 0.5), # 150 FSH / 75 LH
-    "MERIOFERT": (1.0, 1.0),  # 75 FSH / 75 LH
+    "PERGOVERIS": (1.0, 0.5), 
+    "MERIOFERT": (1.0, 1.0),  
     "MENOPUR": (0.0, 1.0),
-    "LEPORI": (0.0, 1.0),
     "NINGUNO": (0.0, 0.0)
 }
 
@@ -77,17 +87,15 @@ def check_password():
     if st.session_state["password_correct"] is True:
         return True
     st.title("Acceso Médico Restringido 🔐")
-    with st.container():
-        user = st.text_input("Usuario")
-        password = st.text_input("Contraseña", type="password")
-        if st.button("ENTRAR"):
-            if user == st.secrets["credentials"]["username"] and \
-               password == st.secrets["credentials"]["password"]:
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.session_state["password_correct"] = False
-                st.error("Credenciales incorrectas.")
+    user = st.text_input("Usuario")
+    password = st.text_input("Contraseña", type="password")
+    if st.button("ENTRAR"):
+        if user == st.secrets["credentials"]["username"] and \
+           password == st.secrets["credentials"]["password"]:
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.error("Credenciales incorrectas.")
     return False
 
 # --- 4. APLICACIÓN PRINCIPAL ---
@@ -105,8 +113,7 @@ if check_password():
 
     scaler, m_fsh1, m_lh1_class, m_lh2_reg, features = load_assets()
 
-    st.title("Predicción Dosis FSH y LH 💉")
-    st.markdown("#### Herramienta de soporte clínico (Basada en 559 punciones 2022-2026)")
+    st.title("IA Dosificación & Calculadora 💉")
     st.divider()
 
     # --- ENTRADA DE DATOS ---
@@ -120,93 +127,84 @@ if check_password():
     
     edad = st.number_input("Edad (años)", value=35, step=1)
     
-    calcular = st.button("CALCULAR DOSIS PERSONALIZADA", use_container_width=True)
+    if "fsh_m" not in st.session_state: st.session_state.fsh_m = 150.0
+    if "lh_m" not in st.session_state: st.session_state.lh_m = 75.0
 
-    # Inicializamos variables en session_state para que la calculadora manual las use
-    if "fsh_manual" not in st.session_state: st.session_state.fsh_manual = 150.0
-    if "lh_manual" not in st.session_state: st.session_state.lh_manual = 75.0
-
-    if calcular:
+    if st.button("CALCULAR DOSIS PERSONALIZADA", use_container_width=True):
         imc = peso / (altura ** 2)
         input_data = pd.DataFrame([[peso, altura, edad, amh, rfa, imc]], columns=features)
         input_scaled = pd.DataFrame(scaler.transform(input_data), columns=features)
         
-        # Predicciones FSH
         fsh_pred = m_fsh1.predict(input_scaled)[0]
         fsh_final = round(fsh_pred / 25) * 25
-        st.session_state.fsh_manual = float(fsh_final)
+        st.session_state.fsh_m = float(fsh_final)
         
-        # Predicciones LH (Tu lógica original de rangos)
         lh_class_val = float(m_lh1_class.predict(input_scaled)[0])
         lh_conf = max(m_lh1_class.predict_proba(input_scaled)[0])
         lh_reg_val = m_lh2_reg.predict(input_scaled)[0]
         lh_reg_final = round(lh_reg_val / 12.5) * 12.5
-        
-        st.session_state.lh_manual = float(lh_class_val)
+        st.session_state.lh_m = float(lh_class_val)
 
-        # --- RESULTADOS VISUALES IA ---
+        # --- RESULTADOS IA ---
         st.divider()
         res_c1, res_c2 = st.columns(2)
-        
         with res_c1:
             st.metric("FSH SUGERIDA", f"{fsh_final} UI")
             st.caption(f"Tendencia matemática: {fsh_pred:.1f} UI")
-
         with res_c2:
             if lh_conf >= 0.90 or lh_class_val == lh_reg_final:
                 st.metric("LH SUGERIDA", f"{lh_class_val} UI")
             else:
                 rango = sorted([lh_class_val, lh_reg_final])
                 st.metric("RANGO LH", f"{rango[0]} - {rango[1]} UI")
-            
             st.info(f"Confianza: {lh_conf:.1%}")
 
-        st.write(f"**Paciente:** {edad} años | **IMC:** {imc:.1f}")
-
-    # --- 5. CALCULADORA DE MEDICACIÓN MANUAL (Ajuste Médico) ---
+    # --- 5. CALCULADORA DE MEDICACIÓN MANUAL ---
     st.divider()
     st.subheader("Configuración de Medicación Comercial 💊")
     
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        fsh_target = st.number_input("Ajuste FSH (UI)", value=st.session_state.fsh_manual, step=12.5)
-        med_fsh = st.selectbox("Fármaco base FSH", ["GONAL", "PUREGON", "BEMFOLA", "REKOVELLE", "FOSTIPUR", "PERGOVERIS", "MERIOFERT"])
-
-    with col_m2:
-        lh_target = st.number_input("Ajuste LH (UI)", value=st.session_state.lh_manual, step=12.5)
-        med_lh = st.selectbox("Fármaco base LH / Segundo", ["MENOPUR", "LEPORI", "PERGOVERIS", "MERIOFERT", "NINGUNO"])
+    c_man1, c_man2 = st.columns(2)
+    with c_man1:
+        fsh_t = st.number_input("Ajuste FSH (UI)", value=st.session_state.fsh_m, step=12.5)
+        med_fsh = st.selectbox("Fármaco 1", list(MEDICAMENTOS.keys()))
+    with c_man2:
+        lh_t = st.number_input("Ajuste LH (UI)", value=st.session_state.lh_m, step=12.5)
+        med_lh = st.selectbox("Fármaco 2", list(MEDICAMENTOS.keys()), index=8)
 
     if st.button("CALCULAR VIALES / UNIDADES"):
         fsh_a, lh_a = MEDICAMENTOS[med_fsh]
         fsh_b, lh_b = MEDICAMENTOS[med_lh] if med_lh != "NINGUNO" else (0.0, 0.0)
 
         det = (fsh_a * lh_b) - (fsh_b * lh_a)
-        
         if abs(det) < 0.001:
-            # Si los medicamentos son del mismo tipo (ej. ambos solo FSH)
-            qty_a = fsh_target / fsh_a if fsh_a > 0 else 0
+            qty_a = fsh_t / fsh_a if fsh_a > 0 else 0
             qty_b = 0
-            if med_lh != "NINGUNO": st.warning("Combinación redundante. Se prioriza el primer fármaco.")
         else:
-            # Sistema de ecuaciones para encontrar la dosis exacta de cada uno
-            qty_a = (fsh_target * lh_b - lh_target * fsh_b) / det
-            qty_b = (fsh_a * lh_target - lh_a * fsh_target) / det
-
-        # Aplicamos redondeo a 12.5 para ser realistas con las plumas
-        qty_a_final = max(0.0, round(qty_a / 12.5) * 12.5)
-        qty_b_final = max(0.0, round(qty_b / 12.5) * 12.5)
+            qty_a = (fsh_t * lh_b - lh_t * fsh_b) / det
+            qty_b = (fsh_a * lh_t - lh_a * fsh_t) / det
 
         st.markdown("### Dosis a administrar:")
-        c_res1, c_res2 = st.columns(2)
-        c_res1.success(f"**{med_fsh}**: {qty_a_final} UI")
-        if med_lh != "NINGUNO":
-            c_res2.success(f"**{med_lh}**: {qty_b_final} UI")
+        res_cols = st.columns(2)
         
-        # Verificación final de lo que recibe el paciente tras el redondeo
-        total_fsh = (qty_a_final * fsh_a) + (qty_b_final * fsh_b)
-        total_lh = (qty_a_final * lh_a) + (qty_b_final * lh_b)
-        st.caption(f"Dosis final real con redondeo: FSH {total_fsh} | LH {total_lh}")
+        # Función para formatear la salida (UI vs mcg)
+        def format_dose(name, val):
+            if name == "REKOVELLE":
+                mcg = val / 12.5
+                return f"{mcg:.2f} µg"
+            return f"{round(val / 12.5) * 12.5} UI"
+
+        with res_cols[0]:
+            st.markdown(f'<div class="dose-box fsh-box">{med_fsh}: {format_dose(med_fsh, qty_a)}</div>', unsafe_allow_html=True)
+        
+        if med_lh != "NINGUNO":
+            with res_cols[1]:
+                # Si el segundo es Rekovelle (poco común pero posible en la app), también lo formatea
+                st.markdown(f'<div class="dose-box lh-box">{med_lh}: {format_dose(med_lh, qty_b)}</div>', unsafe_allow_html=True)
+        
+        # Verificación técnica
+        total_fsh = (qty_a * fsh_a) + (qty_b * fsh_b)
+        total_lh = (qty_a * lh_a) + (qty_b * lh_b)
+        st.caption(f"Dosis final real: FSH {total_fsh:.1f} UI | LH {total_lh:.1f} UI")
 
     st.divider()
     st.caption("Esta herramienta es un soporte diagnóstico. El criterio clínico del médico es soberano.")
-
