@@ -10,7 +10,7 @@ import streamlit as st
 import pandas as pd
 import joblib
 
-# --- 1. CONFIGURACIÓN VISUAL Y LIMPIEZA DE INTERFAZ ---
+# --- 1. CONFIGURACIÓN VISUAL ---
 st.set_page_config(page_title="IA Dosificación", page_icon="💉", layout="centered")
 
 st.markdown(f"""
@@ -23,7 +23,7 @@ st.markdown(f"""
         color: #D2C2B0;
     }}
     label {{
-        font-size: 1.25rem !important;
+        font-size: 1.2rem !important;
         color: #D2C2B0 !important;
         font-weight: 500;
     }}
@@ -32,46 +32,35 @@ st.markdown(f"""
         color: #182430 !important;
         border: none;
         font-weight: bold;
-        font-size: 1.4rem !important;
-        height: 3.5em !important;
-        margin-top: 1.5em;
+        font-size: 1.3rem !important;
         border-radius: 8px;
     }}
     div[data-testid="stMetric"] {{
         background-color: #3d4752;
-        padding: 25px;
+        padding: 20px;
         border-radius: 12px;
         border-left: 8px solid #A78C6F;
     }}
-    div[data-testid="stMetricValue"] > div {{
-        font-size: 3rem !important;
-        color: #D2C2B0 !important;
-    }}
-    div[data-testid="stMetricLabel"] > div {{
-        font-size: 1.2rem !important;
-        color: #A78C6F !important;
-        text-transform: uppercase;
-    }}
-    /* Estilo para los cuadros de dosis finales */
+    /* Estilo de las cajas de dosis finales */
     .dose-box {{
-        padding: 15px;
+        padding: 20px;
         border-radius: 10px;
-        margin: 5px 0;
+        margin: 10px 0;
         font-weight: bold;
         text-align: center;
+        font-size: 1.2rem;
     }}
-    .fsh-box {{ background-color: rgba(46, 125, 50, 0.2); border: 1px solid #4CAF50; color: #81C784; }}
-    .lh-box {{ background-color: rgba(25, 118, 210, 0.2); border: 1px solid #2196F3; color: #64B5F6; }}
+    .fsh-box {{ background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4CAF50; color: #81C784; }}
+    .lh-box {{ background-color: rgba(33, 150, 243, 0.15); border: 2px solid #2196F3; color: #64B5F6; }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DICCIONARIO DE MEDICAMENTOS (Actualizado) ---
-# Rekovelle se trata internamente como FSH, pero se convertirá a mcg en la salida.
+# --- 2. DICCIONARIO DE MEDICAMENTOS Y LISTAS FILTRADAS ---
 MEDICAMENTOS = {
     "GONAL": (1.0, 0.0),
     "PUREGON": (1.0, 0.0),
     "BEMFOLA": (1.0, 0.0),
-    "REKOVELLE": (1.0, 0.0), # Se calcula en UI y se divide por 12.5 al mostrar
+    "REKOVELLE": (1.0, 0.0),
     "FOSTIPUR": (1.0, 0.0),
     "OVELAP": (1.0, 0.0),
     "PERGOVERIS": (1.0, 0.5), 
@@ -79,6 +68,10 @@ MEDICAMENTOS = {
     "MENOPUR": (0.0, 1.0),
     "NINGUNO": (0.0, 0.0)
 }
+
+# Listas específicas para los selectores
+LISTA_FSH = ["GONAL", "PUREGON", "BEMFOLA", "REKOVELLE", "FOSTIPUR", "OVELAP", "PERGOVERIS", "MERIOFERT"]
+LISTA_LH = ["MENOPUR", "PERGOVERIS", "MERIOFERT", "NINGUNO"]
 
 # --- 3. GESTIÓN DE ACCESO ---
 def check_password():
@@ -116,17 +109,18 @@ if check_password():
     st.title("IA Dosificación & Calculadora 💉")
     st.divider()
 
-    # --- ENTRADA DE DATOS ---
+    # --- ENTRADA DE VARIABLES ---
     col1, col2 = st.columns(2)
     with col1:
-        peso = st.number_input("Peso (kg)", value=67.0, step=0.1, format="%.2f")
-        amh = st.number_input("AMH (ng/ml)", value=0.38, step=0.01, format="%.2f")
+        peso = st.number_input("Peso (kg)", value=67.0, step=0.1)
+        amh = st.number_input("AMH (ng/ml)", value=0.38, step=0.01)
     with col2:
-        altura = st.number_input("Altura (m)", value=1.68, step=0.01, format="%.2f")
+        altura = st.number_input("Altura (m)", value=1.68, step=0.01)
         rfa = st.number_input("RFA (folículos)", value=6, step=1)
     
     edad = st.number_input("Edad (años)", value=35, step=1)
     
+    # Session state para comunicación entre bloques
     if "fsh_m" not in st.session_state: st.session_state.fsh_m = 150.0
     if "lh_m" not in st.session_state: st.session_state.lh_m = 75.0
 
@@ -145,7 +139,7 @@ if check_password():
         lh_reg_final = round(lh_reg_val / 12.5) * 12.5
         st.session_state.lh_m = float(lh_class_val)
 
-        # --- RESULTADOS IA ---
+        # Resultados IA (Original)
         st.divider()
         res_c1, res_c2 = st.columns(2)
         with res_c1:
@@ -159,52 +153,54 @@ if check_password():
                 st.metric("RANGO LH", f"{rango[0]} - {rango[1]} UI")
             st.info(f"Confianza: {lh_conf:.1%}")
 
-    # --- 5. CALCULADORA DE MEDICACIÓN MANUAL ---
+    # --- 5. CALCULADORA DE MEDICACIÓN (Ajuste por el médico) ---
     st.divider()
-    st.subheader("Configuración de Medicación Comercial 💊")
+    st.subheader("Configuración de Medicación Real 💊")
     
-    c_man1, c_man2 = st.columns(2)
-    with c_man1:
-        fsh_t = st.number_input("Ajuste FSH (UI)", value=st.session_state.fsh_m, step=12.5)
-        med_fsh = st.selectbox("Fármaco 1", list(MEDICAMENTOS.keys()))
-    with c_man2:
-        lh_t = st.number_input("Ajuste LH (UI)", value=st.session_state.lh_m, step=12.5)
-        med_lh = st.selectbox("Fármaco 2", list(MEDICAMENTOS.keys()), index=8)
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        fsh_target = st.number_input("Dosis FSH deseada (UI)", value=st.session_state.fsh_m, step=12.5)
+        med_fsh = st.selectbox("Seleccionar fármaco base FSH", LISTA_FSH)
+
+    with col_m2:
+        lh_target = st.number_input("Dosis LH deseada (UI)", value=st.session_state.lh_m, step=12.5)
+        med_lh = st.selectbox("Seleccionar fármaco base LH", LISTA_LH)
 
     if st.button("CALCULAR VIALES / UNIDADES"):
-        fsh_a, lh_a = MEDICAMENTOS[med_fsh]
-        fsh_b, lh_b = MEDICAMENTOS[med_lh] if med_lh != "NINGUNO" else (0.0, 0.0)
+        f_a, l_a = MEDICAMENTOS[med_fsh]
+        f_b, l_b = MEDICAMENTOS[med_lh] if med_lh != "NINGUNO" else (0.0, 0.0)
 
-        det = (fsh_a * lh_b) - (fsh_b * lh_a)
+        # Resolución del sistema de ecuaciones
+        det = (f_a * l_b) - (f_b * l_a)
         if abs(det) < 0.001:
-            qty_a = fsh_t / fsh_a if fsh_a > 0 else 0
+            qty_a = fsh_target / f_a if f_a > 0 else 0
             qty_b = 0
+            if med_lh != "NINGUNO": st.warning("Combinación con el mismo ratio. Usando fármaco base.")
         else:
-            qty_a = (fsh_t * lh_b - lh_t * fsh_b) / det
-            qty_b = (fsh_a * lh_t - lh_a * fsh_t) / det
+            qty_a = (fsh_target * l_b - lh_target * f_b) / det
+            qty_b = (f_a * lh_target - l_a * fsh_target) / det
 
         st.markdown("### Dosis a administrar:")
-        res_cols = st.columns(2)
         
-        # Función para formatear la salida (UI vs mcg)
-        def format_dose(name, val):
+        def display_dose(name, val, color_class):
             if name == "REKOVELLE":
                 mcg = val / 12.5
-                return f"{mcg:.2f} µg"
-            return f"{round(val / 12.5) * 12.5} UI"
+                text = f"{name}: {mcg:.2f} µg"
+            else:
+                ui = max(0.0, round(val / 12.5) * 12.5)
+                text = f"{name}: {ui} UI"
+            st.markdown(f'<div class="dose-box {color_class}">{text}</div>', unsafe_allow_html=True)
 
-        with res_cols[0]:
-            st.markdown(f'<div class="dose-box fsh-box">{med_fsh}: {format_dose(med_fsh, qty_a)}</div>', unsafe_allow_html=True)
-        
-        if med_lh != "NINGUNO":
-            with res_cols[1]:
-                # Si el segundo es Rekovelle (poco común pero posible en la app), también lo formatea
-                st.markdown(f'<div class="dose-box lh-box">{med_lh}: {format_dose(med_lh, qty_b)}</div>', unsafe_allow_html=True)
-        
-        # Verificación técnica
-        total_fsh = (qty_a * fsh_a) + (qty_b * fsh_b)
-        total_lh = (qty_a * lh_a) + (qty_b * lh_b)
-        st.caption(f"Dosis final real: FSH {total_fsh:.1f} UI | LH {total_lh:.1f} UI")
+        res_p1, res_p2 = st.columns(2)
+        with res_p1:
+            display_dose(med_fsh, qty_a, "fsh-box")
+        with res_p2:
+            if med_lh != "NINGUNO":
+                display_dose(med_lh, qty_b, "lh-box")
+
+        total_fsh = (qty_a * f_a) + (qty_b * f_b)
+        total_lh = (qty_a * l_a) + (qty_b * l_b)
+        st.caption(f"Verificación final: FSH {total_fsh:.1f} UI | LH {total_lh:.1f} UI")
 
     st.divider()
     st.caption("Esta herramienta es un soporte diagnóstico. El criterio clínico del médico es soberano.")
