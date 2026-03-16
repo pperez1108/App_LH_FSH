@@ -9,7 +9,7 @@ import streamlit as st
 import pandas as pd
 import joblib
 
-# --- 1. CONFIGURACIÓN VISUAL ---
+# --- 1. CONFIGURACIÓN VISUAL Y LIMPIEZA DE INTERFAZ ---
 st.set_page_config(page_title="IA Dosificación", page_icon="💉", layout="centered")
 
 st.markdown(f"""
@@ -22,7 +22,7 @@ st.markdown(f"""
         color: #D2C2B0;
     }}
     label {{
-        font-size: 1.2rem !important;
+        font-size: 1.25rem !important;
         color: #D2C2B0 !important;
         font-weight: 500;
     }}
@@ -31,14 +31,25 @@ st.markdown(f"""
         color: #182430 !important;
         border: none;
         font-weight: bold;
-        font-size: 1.3rem !important;
+        font-size: 1.4rem !important;
+        height: 3.5em !important;
+        margin-top: 1.5em;
         border-radius: 8px;
     }}
     div[data-testid="stMetric"] {{
         background-color: #3d4752;
-        padding: 20px;
+        padding: 25px;
         border-radius: 12px;
         border-left: 8px solid #A78C6F;
+    }}
+    div[data-testid="stMetricValue"] > div {{
+        font-size: 3rem !important;
+        color: #D2C2B0 !important;
+    }}
+    div[data-testid="stMetricLabel"] > div {{
+        font-size: 1.2rem !important;
+        color: #A78C6F !important;
+        text-transform: uppercase;
     }}
     .dose-box {{
         padding: 20px;
@@ -53,7 +64,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DICCIONARIO DE MEDICAMENTOS ---
+# --- 2. CONFIGURACIÓN DE MEDICAMENTOS ---
 MEDICAMENTOS = {
     "GONAL": (1.0, 0.0),
     "PUREGON": (1.0, 0.0),
@@ -104,14 +115,16 @@ if check_password():
     scaler, m_fsh1, m_lh1_class, m_lh2_reg, features = load_assets()
 
     st.title("IA Dosificación & Calculadora 💉")
+    st.markdown("#### Herramienta de soporte clínico (Basada en 559 punciones 2022-2026)")
     st.divider()
 
+    # Bloque de entrada
     col1, col2 = st.columns(2)
     with col1:
-        peso = st.number_input("Peso (kg)", value=67.0, step=0.1)
-        amh = st.number_input("AMH (ng/ml)", value=0.38, step=0.01)
+        peso = st.number_input("Peso (kg)", value=67.0, step=0.1, format="%.2f")
+        amh = st.number_input("AMH (ng/ml)", value=0.38, step=0.01, format="%.2f")
     with col2:
-        altura = st.number_input("Altura (m)", value=1.68, step=0.01)
+        altura = st.number_input("Altura (m)", value=1.68, step=0.01, format="%.2f")
         rfa = st.number_input("RFA (folículos)", value=6, step=1)
     
     edad = st.number_input("Edad (años)", value=35, step=1)
@@ -124,6 +137,7 @@ if check_password():
         input_data = pd.DataFrame([[peso, altura, edad, amh, rfa, imc]], columns=features)
         input_scaled = pd.DataFrame(scaler.transform(input_data), columns=features)
         
+        # Lógica IA original
         fsh_pred = m_fsh1.predict(input_scaled)[0]
         fsh_final = round(fsh_pred / 25) * 25
         st.session_state.fsh_m = float(fsh_final)
@@ -147,7 +161,7 @@ if check_password():
                 st.metric("RANGO LH", f"{rango[0]} - {rango[1]} UI")
             st.info(f"Confianza: {lh_conf:.1%}")
 
-    # --- 5. CALCULADORA DE MEDICACIÓN (CORREGIDA) ---
+    # --- 5. CALCULADORA DE MEDICACIÓN (Lógica Estricta) ---
     st.divider()
     st.subheader("Configuración de Medicación Real 💊")
     
@@ -163,43 +177,46 @@ if check_password():
         f_a, l_a = MEDICAMENTOS[med_fsh]
         f_b, l_b = MEDICAMENTOS[med_lh] if med_lh != "NINGUNO" else (0.0, 0.0)
 
-        # LÓGICA DE SEGURIDAD:
-        # Si el fármaco de LH también tiene FSH (Pergoveris/Meriofert), 
-        # calculamos primero cuánto de ese fármaco cubre la LH deseada.
-        if l_b > 0:
-            qty_b = lh_target / l_b
-            # Calculamos cuánta FSH ha aportado ya ese fármaco de LH
-            fsh_aportada_por_b = qty_b * f_b
-            # El resto de FSH se cubre con el fármaco A
-            qty_a = max(0.0, (fsh_target - fsh_aportada_por_b) / f_a) if f_a > 0 else 0
-        else:
-            # Si el fármaco 2 no tiene LH (ej. NINGUNO), el fármaco 1 debe cubrir todo
-            qty_a = fsh_target / f_a if f_a > 0 else 0
-            qty_b = 0
+        # Resolución del sistema
+        det = (f_a * l_b) - (f_b * l_a)
+        qty_a, qty_b, error_msg = 0, 0, None
 
-        st.markdown("### Dosis a administrar:")
-        
-        def display_dose(name, val, color_class):
-            if name == "REKOVELLE":
-                mcg = val / 12.5
-                text = f"{name}: {mcg:.2f} µg"
+        if abs(det) < 0.001:
+            if l_a == 0 and lh_target > 0 and l_b == 0:
+                error_msg = "Imposible: Ninguno de los fármacos elegidos contiene LH."
             else:
-                ui = max(0.0, round(val / 12.5) * 12.5)
-                text = f"{name}: {ui} UI"
-            st.markdown(f'<div class="dose-box {color_class}">{text}</div>', unsafe_allow_html=True)
+                qty_a = fsh_target / f_a if f_a > 0 else 0
+                qty_b = 0
+        else:
+            qty_a = (fsh_target * l_b - lh_target * f_b) / det
+            qty_b = (f_a * lh_target - l_a * fsh_target) / det
 
-        res_p1, res_p2 = st.columns(2)
-        with res_p1:
-            display_dose(med_fsh, qty_a, "fsh-box")
-        with res_p2:
-            if med_lh != "NINGUNO":
-                display_dose(med_lh, qty_b, "lh-box")
+        # Validación de imposibilidad (Valores negativos)
+        if qty_a < -0.01 or qty_b < -0.01:
+            error_msg = "Combinación Imposible: La composición de estos fármacos supera la dosis deseada. Pruebe a usar un fármaco puramente FSH o puramente LH para ajustar."
 
-        total_fsh = (qty_a * f_a) + (qty_b * l_b * (f_b/l_b if l_b>0 else 0))
-        # Ajuste de verificación para mostrar al médico
-        real_fsh = (qty_a * f_a) + (qty_b * f_b)
-        real_lh = (qty_a * l_a) + (qty_b * l_b)
-        st.caption(f"Verificación final: FSH {real_fsh:.1f} UI | LH {real_lh:.1f} UI")
+        if error_msg:
+            st.error(error_msg)
+        else:
+            st.markdown("### Dosis a administrar:")
+            res_p1, res_p2 = st.columns(2)
+            
+            def display_dose(name, val, color_class):
+                if name == "REKOVELLE":
+                    text = f"{name}: {val / 12.5:.2f} µg"
+                else:
+                    text = f"{name}: {max(0.0, round(val / 12.5) * 12.5)} UI"
+                st.markdown(f'<div class="dose-box {color_class}">{text}</div>', unsafe_allow_html=True)
+
+            with res_p1:
+                display_dose(med_fsh, qty_a, "fsh-box")
+            with res_p2:
+                if med_lh != "NINGUNO":
+                    display_dose(med_lh, qty_b, "lh-box")
+
+            real_fsh = (qty_a * f_a) + (qty_b * f_b)
+            real_lh = (qty_a * l_a) + (qty_b * l_b)
+            st.caption(f"Verificación final: FSH {real_fsh:.1f} UI | LH {real_lh:.1f} UI")
 
     st.divider()
     st.caption("Esta herramienta es un soporte diagnóstico. El criterio clínico del médico es soberano.")
