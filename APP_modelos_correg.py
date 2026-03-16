@@ -5,7 +5,6 @@ Created on Tue Mar 10 17:24:57 2026
 @author: pperez
 """
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*- 
 import streamlit as st
 import pandas as pd
 import joblib
@@ -41,7 +40,6 @@ st.markdown(f"""
         border-radius: 12px;
         border-left: 8px solid #A78C6F;
     }}
-    /* Estilo de las cajas de dosis finales */
     .dose-box {{
         padding: 20px;
         border-radius: 10px;
@@ -55,7 +53,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DICCIONARIO DE MEDICAMENTOS Y LISTAS FILTRADAS ---
+# --- 2. DICCIONARIO DE MEDICAMENTOS ---
 MEDICAMENTOS = {
     "GONAL": (1.0, 0.0),
     "PUREGON": (1.0, 0.0),
@@ -69,7 +67,6 @@ MEDICAMENTOS = {
     "NINGUNO": (0.0, 0.0)
 }
 
-# Listas específicas para los selectores
 LISTA_FSH = ["GONAL", "PUREGON", "BEMFOLA", "REKOVELLE", "FOSTIPUR", "OVELAP", "PERGOVERIS", "MERIOFERT"]
 LISTA_LH = ["MENOPUR", "PERGOVERIS", "MERIOFERT", "NINGUNO"]
 
@@ -109,7 +106,6 @@ if check_password():
     st.title("IA Dosificación & Calculadora 💉")
     st.divider()
 
-    # --- ENTRADA DE VARIABLES ---
     col1, col2 = st.columns(2)
     with col1:
         peso = st.number_input("Peso (kg)", value=67.0, step=0.1)
@@ -120,7 +116,6 @@ if check_password():
     
     edad = st.number_input("Edad (años)", value=35, step=1)
     
-    # Session state para comunicación entre bloques
     if "fsh_m" not in st.session_state: st.session_state.fsh_m = 150.0
     if "lh_m" not in st.session_state: st.session_state.lh_m = 75.0
 
@@ -139,7 +134,6 @@ if check_password():
         lh_reg_final = round(lh_reg_val / 12.5) * 12.5
         st.session_state.lh_m = float(lh_class_val)
 
-        # Resultados IA (Original)
         st.divider()
         res_c1, res_c2 = st.columns(2)
         with res_c1:
@@ -153,7 +147,7 @@ if check_password():
                 st.metric("RANGO LH", f"{rango[0]} - {rango[1]} UI")
             st.info(f"Confianza: {lh_conf:.1%}")
 
-    # --- 5. CALCULADORA DE MEDICACIÓN (Ajuste por el médico) ---
+    # --- 5. CALCULADORA DE MEDICACIÓN (CORREGIDA) ---
     st.divider()
     st.subheader("Configuración de Medicación Real 💊")
     
@@ -161,7 +155,6 @@ if check_password():
     with col_m1:
         fsh_target = st.number_input("Dosis FSH deseada (UI)", value=st.session_state.fsh_m, step=12.5)
         med_fsh = st.selectbox("Seleccionar fármaco base FSH", LISTA_FSH)
-
     with col_m2:
         lh_target = st.number_input("Dosis LH deseada (UI)", value=st.session_state.lh_m, step=12.5)
         med_lh = st.selectbox("Seleccionar fármaco base LH", LISTA_LH)
@@ -170,15 +163,19 @@ if check_password():
         f_a, l_a = MEDICAMENTOS[med_fsh]
         f_b, l_b = MEDICAMENTOS[med_lh] if med_lh != "NINGUNO" else (0.0, 0.0)
 
-        # Resolución del sistema de ecuaciones
-        det = (f_a * l_b) - (f_b * l_a)
-        if abs(det) < 0.001:
+        # LÓGICA DE SEGURIDAD:
+        # Si el fármaco de LH también tiene FSH (Pergoveris/Meriofert), 
+        # calculamos primero cuánto de ese fármaco cubre la LH deseada.
+        if l_b > 0:
+            qty_b = lh_target / l_b
+            # Calculamos cuánta FSH ha aportado ya ese fármaco de LH
+            fsh_aportada_por_b = qty_b * f_b
+            # El resto de FSH se cubre con el fármaco A
+            qty_a = max(0.0, (fsh_target - fsh_aportada_por_b) / f_a) if f_a > 0 else 0
+        else:
+            # Si el fármaco 2 no tiene LH (ej. NINGUNO), el fármaco 1 debe cubrir todo
             qty_a = fsh_target / f_a if f_a > 0 else 0
             qty_b = 0
-            if med_lh != "NINGUNO": st.warning("Combinación con el mismo ratio. Usando fármaco base.")
-        else:
-            qty_a = (fsh_target * l_b - lh_target * f_b) / det
-            qty_b = (f_a * lh_target - l_a * fsh_target) / det
 
         st.markdown("### Dosis a administrar:")
         
@@ -198,9 +195,11 @@ if check_password():
             if med_lh != "NINGUNO":
                 display_dose(med_lh, qty_b, "lh-box")
 
-        total_fsh = (qty_a * f_a) + (qty_b * f_b)
-        total_lh = (qty_a * l_a) + (qty_b * l_b)
-        st.caption(f"Verificación final: FSH {total_fsh:.1f} UI | LH {total_lh:.1f} UI")
+        total_fsh = (qty_a * f_a) + (qty_b * l_b * (f_b/l_b if l_b>0 else 0))
+        # Ajuste de verificación para mostrar al médico
+        real_fsh = (qty_a * f_a) + (qty_b * f_b)
+        real_lh = (qty_a * l_a) + (qty_b * l_b)
+        st.caption(f"Verificación final: FSH {real_fsh:.1f} UI | LH {real_lh:.1f} UI")
 
     st.divider()
     st.caption("Esta herramienta es un soporte diagnóstico. El criterio clínico del médico es soberano.")
