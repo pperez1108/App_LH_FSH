@@ -10,7 +10,7 @@ import pandas as pd
 import joblib
 
 # --- 1. CONFIGURACIÓN VISUAL Y LIMPIEZA DE INTERFAZ ---
-st.set_page_config(page_title="IA Dosificación", page_icon="💉", layout="centered")
+st.set_page_config(page_title="Dosificación", page_icon="💉", layout="centered")
 
 st.markdown(f"""
     <style>
@@ -114,7 +114,7 @@ if check_password():
 
     scaler, m_fsh1, m_lh1_class, m_lh2_reg, features = load_assets()
 
-    st.title("IA Dosificación & Calculadora 💉")
+    st.title("Dosificación & Calculadora 💉")
     st.markdown("#### Herramienta de soporte clínico (Basada en 559 punciones 2022-2026)")
     st.divider()
 
